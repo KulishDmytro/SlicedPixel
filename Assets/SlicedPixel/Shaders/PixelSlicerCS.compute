@@ -1,0 +1,44 @@
+#pragma kernel PixelSlicesCS
+
+RWStructuredBuffer<float2> MvBuffer;
+RWStructuredBuffer<float2> PixelPos;
+float4 cPos;
+float4 cRight;
+float4x4 cRot;
+float BladeSize;
+float MaskSize;
+float OffsetIntensity;
+float DissolveSpeed;
+float DissolveCutout;
+float dt;
+float MoveIndication;
+
+[numthreads(64,1,1)]
+void PixelSlicesCS (uint3 id : SV_DispatchThreadID)
+{
+  // Fetch pixel position from Buffer
+  float3 pixPos = float3(PixelPos[id.x].x, PixelPos[id.x].y, 0.0f);
+  
+  // Rotate pixel position vector around Control Point pivot
+  pixPos =  mul(cRot, float4(pixPos - cPos.xyz, 0.0f)).xyz + cPos.xyz;
+  
+  // Adjust X position for adding Blade shape into effect
+  float3 pixPosMod = float3((cPos.x - pixPos.x)/BladeSize + cPos.x, pixPos.y, pixPos.z);
+  
+  // Calculate distance field mask
+  float dist = 1 - saturate(length(cPos.xyz - pixPosMod) * MaskSize);
+  
+  // Calculate side detection mask  
+  // heading.x = -1 = Pixel located on a Left side from ControlPoint 
+  // heading.x =  1 = Pixel located on a Right side from ControlPoint 
+  float3 heading = normalize(float3(pixPos.x - cPos.x, pixPos.y - cPos.y, 0.0f));
+  float distMask =  heading.x * dist * OffsetIntensity * MoveIndication;
+  
+  // Add Motion Vector value to buffer
+  MvBuffer[id.x].x += cRight.x * distMask;
+  MvBuffer[id.x].y += cRight.y * distMask;
+  
+  // Each calculculation slightly decrease Motion vector value
+  MvBuffer[id.x].x = abs(MvBuffer[id.x].x) > DissolveCutout ? lerp(MvBuffer[id.x].x, 0.0f, DissolveSpeed * dt) : 0.0f;
+  MvBuffer[id.x].y = abs(MvBuffer[id.x].y) > DissolveCutout ? lerp(MvBuffer[id.x].y, 0.0f, DissolveSpeed * dt) : 0.0f;
+}
